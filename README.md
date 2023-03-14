@@ -17,4 +17,4 @@ Run script from admin powershell window:
 
  Watch output:
 
- [](.images/powershell_screenshot.png)
+![Powershell Screenshot](.images/powershell_screenshot.png)
