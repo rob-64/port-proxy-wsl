@@ -10,6 +10,20 @@ function Reset-State {
 
 Reset-State
 
+function Delete-Port-Proxy($port) {
+    Write-Output "removing portproxy $port"
+    Invoke-Expression "netsh interface portproxy delete v4tov4 listenport=$port" | out-null
+    Invoke-Expression "netsh advfirewall firewall del rule name='WSL Port Proxy' protocol=TCP localport=$port" | out-null
+}
+
+function Add-Port-Proxy($port, $dstAddr, $dstPort){
+    Invoke-Expression "netsh interface portproxy delete v4tov4 listenport=$port" | out-null
+    Invoke-Expression "netsh advfirewall firewall del rule name='WSL Port Proxy' protocol=TCP localport=$port" | out-null
+    Write-Output "adding portproxy: $port -> $dstPort"
+    Invoke-Expression "netsh interface portproxy add v4tov4 listenport=$port connectaddress=$dstAddr connectport=$dstPort" | out-null
+    Invoke-Expression "netsh advfirewall firewall add rule name='WSL Port Proxy' dir=in action=allow protocol=TCP localport=$port" | out-null
+}
+
 while ($true) {
 
     $wsl_running = (wsl -l --running | Where-Object { $_.Replace("`0", "") -match 'Default' } | Measure-Object -Line | Select-Object -expand Lines)
@@ -19,11 +33,11 @@ while ($true) {
     elseif ($wsl_running -eq 1) {
         if ($wsl_ip.Length -eq 0) {
             $wsl_ip = wsl -u root -e sh -c "ip -o -4 addr list eth0 | awk '{print `$4}' | cut -d/ -f1"
+            Write-Output $wsl_ip
         }
         if ($wsl_ip.Length -ne 0) {
             $newPorts = @()
-            $netstat = wsl -u root -e sh -c 'netstat -tpln 2> /dev/null'
-            # Write-Output $netstat
+            $netstat = wsl -u root -e sh -c 'netstat -tpln'
             # parse netstat into array
             foreach ($line in $netstat) {
                 if ($line.StartsWith("tcp")) {
@@ -43,41 +57,48 @@ while ($true) {
             $updatedPorts = $false
             # sometimes we get an empty array
             if ($newPorts.Length -gt 0 -Or $newPorts.Length -ne $currentPorts.Length) {
-
                 # remove old ports
                 For ($i = 0; $i -lt $currentPorts.Length; $i++) {
                     $currentPort = $currentPorts[$i]
                     if (!$newPorts.Contains($currentPort)) {
-                        Invoke-Expression "netsh interface portproxy delete v4tov4 listenport=$currentPort" | out-null
-                        Invoke-Expression "netsh advfirewall firewall del rule name='WSL Port Proxy' protocol=TCP localport=$currentPort" | out-null
-                        # Write-Output "removed: $currentPort"
+                        $listenPort = $currentPort
+                        # always forward 443 -> 8443
+                        if ($listenPort -eq 8443) {
+                            $listenPort = 443
+                        }
+                        Delete-Port-Proxy $listenPort
                         $updatedPorts = $true
                     }
                 }
                 # forward new ports
                 For ($i = 0; $i -lt $newPorts.Length; $i++) {
                     $newPort = $newPorts[$i]
+                    $listenPort = $newPort
+                    # always forward 443 -> 8443
+                    if ($listenPort -eq 8443) {
+                        $listenPort = 443
+                    }
+                    # always forward 80 -> 8000
+                    if ($listenPort -eq 8000) {
+                        $listenPort = 80
+                    }
                     if (!$currentPorts.Contains($newPort)) {
-                        Invoke-Expression "netsh interface portproxy delete v4tov4 listenport=$newPort" | out-null
-                        Invoke-Expression "netsh advfirewall firewall del rule name='WSL Port Proxy' protocol=TCP localport=$newPort" | out-null
-                        Invoke-Expression "netsh interface portproxy add v4tov4 listenport=$newPort connectaddress=$wsl_ip connectport=$newPort" | out-null
-                        Invoke-Expression "netsh advfirewall firewall add rule name='WSL Port Proxy' dir=in action=allow protocol=TCP localport=$newPort" | out-null
-                        # Write-Output "added: $newPort"
+                        Add-Port-Proxy $listenPort $wsl_ip $newPort
                         $updatedPorts = $true
                     }
                 }
                 if ($updatedPorts -eq $true) {
                     # set currentPorts
                     $currentPorts = $newPorts
-                    Clear-Host    
-                    Invoke-Expression "netsh interface portproxy show v4tov4"
                 }
             }
+            # Clear-Host
+            # Invoke-Expression "netsh interface portproxy show v4tov4"
         }
         else {
-            # Write-Warning "WSL IP is empty..."
+            Write-Warning "WSL IP is empty..."
         }
     }
 
-    Start-Sleep -Milliseconds 2000
+    Start-Sleep -Milliseconds 5000
 }

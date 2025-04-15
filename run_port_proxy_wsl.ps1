@@ -1,4 +1,4 @@
-$commpath = '"C:\Users\rob\port_proxy_wsl.ps1"'
-$strCommand = "powershell -WindowStyle hidden -file $($commpath)"
+$portProxyScript = '"$HOME\port_proxy_wsl.ps1"'
+$portProxyRun = "powershell -WindowStyle hidden -file $($portProxyScript)"
 
-Invoke-Expression $strCommand
+Invoke-Expression $portProxyRun
